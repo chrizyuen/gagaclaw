@@ -163,7 +163,7 @@ function nodeStreamFetch(port, pathName, body, csrfToken, onFrame, onEnd, host) 
 function parseStreamFrame(jsonStr) {
     try {
         const obj = JSON.parse(jsonStr);
-        const info = { thinking: [], response: [], toolCalls: [], trajectoryId: null, stepIndex: null, turnDone: false, newStepStarted: false, permissionWait: null, permissionPath: null, permissionCmd: null };
+        const info = { thinking: [], response: [], toolCalls: [], trajectoryId: null, stepIndex: null, turnDone: false, newStepStarted: false, permissionWait: null, permissionPath: null, permissionCmd: null, serverError: null };
         walk(obj, [], info);
         const diffs = obj?.diff?.fieldDiffs;
         if (diffs && diffs.length === 1 && diffs[0].fieldNumber === 8) {
@@ -264,6 +264,25 @@ function walk(node, fieldStack, info) {
             if (permPath) info.permissionPath = permPath;
             if (cmdLine) info.permissionCmd = cmdLine;
             pktWrite(`PERM_TYPE_DETECT type=${info.permissionWait} stepType=${stepType} cmd=${cmdLine} path=${permPath} stack=[${newStack.join(',')}]`);
+        }
+    }
+
+    // Server error detection: fieldNumber 24 contains error details (e.g. 503 capacity exhausted)
+    if (fn === 24 && node.updateSingular?.messageValue?.fieldDiffs) {
+        const errDiffs = node.updateSingular.messageValue.fieldDiffs;
+        let errUserMsg = null, errCode = null, errTechMsg = null;
+        for (const ed of errDiffs) {
+            if (ed.fieldNumber === 3 && ed.updateSingular?.messageValue?.fieldDiffs) {
+                for (const inner of ed.updateSingular.messageValue.fieldDiffs) {
+                    if (inner.fieldNumber === 1 && inner.updateSingular?.stringValue) errUserMsg = inner.updateSingular.stringValue;
+                    if (inner.fieldNumber === 7 && inner.updateSingular?.uint32Value) errCode = inner.updateSingular.uint32Value;
+                    if (inner.fieldNumber === 9 && inner.updateSingular?.stringValue) errTechMsg = inner.updateSingular.stringValue;
+                }
+            }
+        }
+        if (errUserMsg || errCode) {
+            info.serverError = { code: errCode, message: errUserMsg, technical: errTechMsg };
+            pktWrite(`SERVER_ERROR code=${errCode} msg=${errUserMsg}`);
         }
     }
 
@@ -605,6 +624,13 @@ class Session extends EventEmitter {
             pktWrite(`LATEST_STEP_UPDATE ${this._latestStepIndex} → ${info.stepIndex}`);
             this._latestStepIndex = info.stepIndex;
         }
+        // Server error (e.g. 503 capacity exhausted) → emit and end turn
+        if (info.serverError) {
+            const e = info.serverError;
+            const msg = e.code ? `Server error ${e.code}: ${e.message || e.technical}` : (e.message || 'Unknown server error');
+            this.emit('error', msg);
+        }
+
         if (!this._awaitingResponse) return;
         if (this._pendingToolCall) return;
 
