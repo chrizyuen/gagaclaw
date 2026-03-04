@@ -39,7 +39,7 @@ async function main() {
     const appName = cfg.app?.name || 'Antigravity';
 
     console.log(`\n${c.cyan}${c.bold}═══════════════════════════════════════════════${c.reset}`);
-    console.log(`${c.cyan}${c.bold}  ${appName} CLI Chat v3 (Core + CLI)${c.reset}`);
+    console.log(`${c.cyan}${c.bold}  ${appName} CLI v${LOCAL_VERSION}${c.reset}`);
     console.log(`${c.cyan}${c.bold}═══════════════════════════════════════════════${c.reset}\n`);
 
     const { session, auth, resumed, id, title } = await createSession(coreLogger);
@@ -225,9 +225,9 @@ async function main() {
                 session.destroy();
                 const exeName = (loadConfig().app?.targetExecutables || ['Antigravity.exe'])[0];
                 if (process.platform === 'win32') {
-                    try { require('child_process').execSync(`taskkill /IM ${exeName} /F`, { stdio: 'ignore' }); } catch {}
+                    try { require('child_process').execSync(`taskkill /IM ${exeName} /F`, { stdio: 'ignore' }); } catch { }
                 } else {
-                    try { require('child_process').execSync(`pkill -f ${exeName.replace(/\.exe$/i, '')}`, { stdio: 'ignore' }); } catch {}
+                    try { require('child_process').execSync(`pkill -f ${exeName.replace(/\.exe$/i, '')}`, { stdio: 'ignore' }); } catch { }
                 }
                 process.exit(42);
             } else {

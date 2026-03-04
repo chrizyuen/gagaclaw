@@ -23,8 +23,14 @@ const APP_NAME = cfg.app?.name || 'Antigravity';
 if (!TG_TOKEN) { console.error('No Telegram token. Set telegram.token in gagaclaw.json or TG_TOKEN env.'); process.exit(1); }
 
 // ─── Telegram API (raw HTTP, no dependencies) ───────────────────────────────
+let _rateLimitUntil = 0; // timestamp until which we must wait
+
 function tgRequest(method, params = {}) {
-    return new Promise(resolve => {
+    return new Promise(async resolve => {
+        // Respect rate limit
+        const wait = _rateLimitUntil - Date.now();
+        if (wait > 0) await new Promise(r => setTimeout(r, wait));
+
         const body = Buffer.from(JSON.stringify(params));
         const req = https.request({
             hostname: 'api.telegram.org', port: 443,
@@ -33,7 +39,20 @@ function tgRequest(method, params = {}) {
         }, res => {
             let data = '';
             res.on('data', d => data += d);
-            res.on('end', () => { try { resolve(JSON.parse(data)); } catch { resolve({ ok: false }); } });
+            res.on('end', () => {
+                try {
+                    const r = JSON.parse(data);
+                    // Handle rate limit: wait and retry once
+                    if (r.error_code === 429 && r.parameters?.retry_after) {
+                        const retryMs = r.parameters.retry_after * 1000 + 500;
+                        _rateLimitUntil = Date.now() + retryMs;
+                        flog(`[RATE_LIMIT] ${method}: waiting ${r.parameters.retry_after}s`);
+                        setTimeout(() => tgRequest(method, params).then(resolve), retryMs);
+                        return;
+                    }
+                    resolve(r);
+                } catch { resolve({ ok: false }); }
+            });
         });
         req.on('error', () => resolve({ ok: false }));
         req.write(body); req.end();
@@ -42,6 +61,54 @@ function tgRequest(method, params = {}) {
 
 function escapeHtml(s) {
     return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Restore Telegram-supported HTML tags that were escaped by escapeHtml
+// Note: <br> is NOT supported by Telegram — convert to \n instead
+const TG_TAGS = ['b', 'strong', 'i', 'em', 'u', 'ins', 's', 'strike', 'del', 'code', 'pre', 'blockquote', 'a', 'tg-spoiler', 'tg-emoji'];
+const TG_TAG_RE = new RegExp(`&lt;(/?(?:${TG_TAGS.join('|')})(?:\\s[^&]*?)?)&gt;`, 'gi');
+function restoreTgTags(html) {
+    // <br> / <br/> → newline
+    html = html.replace(/&lt;br\s*\/?\s*&gt;/gi, '\n');
+    return html.replace(TG_TAG_RE, '<$1>');
+}
+
+// Fix unclosed/misnested HTML tags for Telegram strict parser
+function fixTgHtml(html) {
+    const tagStack = [];
+    // Match opening and closing tags
+    const tagRe = /<(\/?)(\w+)(?:\s[^>]*)?>/g;
+    let m;
+    while ((m = tagRe.exec(html)) !== null) {
+        const isClose = m[1] === '/';
+        const tag = m[2].toLowerCase();
+        if (!['b', 'strong', 'i', 'em', 'u', 'ins', 's', 'strike', 'del', 'code', 'pre', 'blockquote', 'tg-spoiler'].includes(tag)) continue;
+        if (isClose) {
+            // Find matching open tag
+            const idx = tagStack.lastIndexOf(tag);
+            if (idx >= 0) {
+                // Close any tags opened after this one (fix nesting)
+                for (let j = tagStack.length - 1; j > idx; j--) {
+                    html = html.slice(0, m.index) + `</${tagStack[j]}>` + html.slice(m.index);
+                    tagRe.lastIndex += tagStack[j].length + 3;
+                    m.index += tagStack[j].length + 3;
+                    tagStack.pop();
+                }
+                tagStack.splice(idx, 1);
+            } else {
+                // Stray close tag — strip it
+                html = html.slice(0, m.index) + html.slice(m.index + m[0].length);
+                tagRe.lastIndex = m.index;
+            }
+        } else {
+            tagStack.push(tag);
+        }
+    }
+    // Close any remaining unclosed tags (in reverse order)
+    for (let i = tagStack.length - 1; i >= 0; i--) {
+        html += `</${tagStack[i]}>`;
+    }
+    return html;
 }
 
 // Simple Markdown → Telegram HTML
@@ -58,6 +125,10 @@ function mdToHtml(text) {
     html = html.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<i>$1</i>');
     // Blockquote: > line
     html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+    // Restore any Telegram-supported HTML tags that AI wrote directly
+    html = restoreTgTags(html);
+    // Fix unclosed/misnested tags for Telegram strict parser
+    html = fixTgHtml(html);
     return html;
 }
 
@@ -177,7 +248,7 @@ function coreLogger(level, msg) {
 // ─── Main ───────────────────────────────────────────────────────────────────
 async function main() {
     console.log(`\n═══════════════════════════════════════════════`);
-    console.log(`  ${APP_NAME} Telegram Bot (Core + Telegram)`);
+    console.log(`  ${APP_NAME} Telegram Bot v${LOCAL_VERSION}`);
     console.log(`═══════════════════════════════════════════════\n`);
 
     // Connect & create session
@@ -192,7 +263,7 @@ async function main() {
         if (v.upToDate === false) {
             const msg = `[⬆] Update available: v${v.local} → v${v.remote}  (git pull to update)`;
             console.log(msg);
-            if (ADMIN_CHAT_ID) tgSend(String(ADMIN_CHAT_ID), `⬆️ Gagaclaw update: <b>v${v.local}</b> → <b>v${v.remote}</b>\nRun <code>git pull</code> to update.`, { parse_mode: 'HTML' }).catch(() => {});
+            if (ADMIN_CHAT_ID) tgSend(String(ADMIN_CHAT_ID), `⬆️ Gagaclaw update: <b>v${v.local}</b> → <b>v${v.remote}</b>\nRun <code>git pull</code> to update.`, { parse_mode: 'HTML' }).catch(() => { });
         } else if (v.upToDate) {
             console.log(`[✓] Gagaclaw v${v.local} (up to date)`);
         } else {
@@ -212,6 +283,7 @@ async function main() {
                 thinkingText: '',
                 responseText: '',
                 lastEditTime: 0,
+                lastEditContent: '',
                 editTimer: null,
             };
         }
@@ -238,10 +310,16 @@ async function main() {
         st.editTimer = setTimeout(async () => {
             st.editTimer = null;
             st.lastEditTime = Date.now();
-            if (!st.responseText) return; // thinking is shown via separate temp message
+            if (!st.responseText) return; // thinking is shown via thinking handler
 
-            const display = mdToHtml(st.responseText);
-            const truncated = display.length > 3900 ? display.slice(0, 3900) + '…' : display;
+            // Show last 3000 chars during streaming (full text sent in turnDone)
+            const tail = st.responseText.length > 3000 ? '…' + st.responseText.slice(-3000) : st.responseText;
+            const display = mdToHtml(tail);
+            const truncated = display.slice(0, 3900);
+
+            // Skip if content hasn't changed (avoid "message is not modified" spam)
+            if (truncated === st.lastEditContent) return;
+            st.lastEditContent = truncated;
 
             // Draft mode: use sendMessageDraft
             if (st.draftId) {
@@ -251,7 +329,7 @@ async function main() {
                     flog(`[DRAFT_FALLBACK] draft failed, switching to edit mode`);
                     st.draftId = null;
                     st.placeholderMsgId = await tgSend(chatId, truncated, HTML)
-                        || await tgSend(chatId, st.responseText.slice(0, 3900));
+                        || await tgSend(chatId, tail.slice(0, 3900));
                 }
                 return;
             }
@@ -260,7 +338,7 @@ async function main() {
             if (!st.placeholderMsgId) return;
             const ok = await tgEdit(chatId, st.placeholderMsgId, truncated, HTML);
             if (!ok) {
-                await tgEdit(chatId, st.placeholderMsgId, st.responseText.slice(0, 3900));
+                await tgEdit(chatId, st.placeholderMsgId, tail.slice(0, 3900));
             }
         }, delay);
     }
@@ -273,15 +351,24 @@ async function main() {
         if (!activeChatId) return;
         const st = getChat(activeChatId);
         st.thinkingText = full;
-        // Show thinking as separate temp message (won't be overwritten by response)
-        if (!st.responseText && !st._thinkingTimer) {
-            st._thinkingTimer = setTimeout(async () => {
-                st._thinkingTimer = null;
-                if (st.thinkingText && !st.responseText) {
-                    const preview = st.thinkingText.length > 800 ? '…' + st.thinkingText.slice(-800) : st.thinkingText;
-                    tgSendTemp(activeChatId, `💭 <i>${escapeHtml(preview)}</i>`, HTML).catch(() => {});
-                }
-            }, 2000); // wait 2s to accumulate thinking before sending
+        // Continuously update thinking display (last ~3000 chars), throttled
+        if (!st.responseText) {
+            if (!st._thinkingTimer) {
+                st._thinkingTimer = setTimeout(async () => {
+                    st._thinkingTimer = null;
+                    if (!st.thinkingText || st.responseText) return;
+                    const preview = st.thinkingText.length > 3000 ? '…' + st.thinkingText.slice(-3000) : st.thinkingText;
+                    const html = `💭 <i>${escapeHtml(preview)}</i>`;
+                    if (html === st._lastThinkingHtml) return;
+                    st._lastThinkingHtml = html;
+
+                    if (st.draftId) {
+                        await tgDraft(activeChatId, st.draftId, html, HTML);
+                    } else if (st.placeholderMsgId) {
+                        await tgEdit(activeChatId, st.placeholderMsgId, html, HTML);
+                    }
+                }, 1500);
+            }
         }
     });
 
@@ -338,31 +425,26 @@ async function main() {
         // Final response
         if (st.editTimer) { clearTimeout(st.editTimer); st.editTimer = null; }
         const finalText = st.responseText || st.thinkingText || '(no response)';
-        const mode = st.draftId ? 'draft' : 'edit';
         const src = st.responseText ? 'response' : st.thinkingText ? 'thinking' : 'none';
-        flog(`[TURN_DONE] mode=${mode} src=${src} len=${finalText.length}`);
+        flog(`[TURN_DONE] src=${src} len=${finalText.length}`);
         flog(`[TURN_DONE] text_preview: ${finalText.slice(0, 200)}`);
 
         const chunks = splitText(finalText, 3500);
         flog(`[TURN_DONE] chunks=${chunks.length} sizes=[${chunks.map(c => c.length).join(',')}]`);
         (async () => {
+            // Delete the streaming message, then send all chunks as new messages
             if (st.draftId) {
-                // Draft mode: send final as regular message(s)
-                // Sending a real message replaces the draft in the UI
                 st.draftId = null;
             }
+            if (st.placeholderMsgId) {
+                tgDeleteMessage(activeChatId, st.placeholderMsgId);
+                st.placeholderMsgId = null;
+            }
 
-            for (let i = 0; i < chunks.length; i++) {
-                const chunkHtml = mdToHtml(chunks[i]);
-                if (i === 0 && st.placeholderMsgId) {
-                    // Edit mode: update placeholder with first chunk
-                    const ok = await tgEdit(activeChatId, st.placeholderMsgId, chunkHtml, HTML);
-                    if (!ok) await tgEdit(activeChatId, st.placeholderMsgId, chunks[0]);
-                } else {
-                    // Send as new message (draft mode always goes here; edit mode for chunks 1+)
-                    const mid = await tgSend(activeChatId, chunkHtml, HTML);
-                    if (!mid) await tgSend(activeChatId, chunks[i]);
-                }
+            for (const chunk of chunks) {
+                const chunkHtml = mdToHtml(chunk);
+                const mid = await tgSend(activeChatId, chunkHtml, HTML);
+                if (!mid) await tgSend(activeChatId, chunk);
             }
 
             // Reset state & dequeue
@@ -371,6 +453,8 @@ async function main() {
             st.placeholderMsgId = null;
             st.thinkingText = '';
             st.responseText = '';
+            st.lastEditContent = '';
+            st._lastThinkingHtml = '';
             if (st._thinkingTimer) { clearTimeout(st._thinkingTimer); st._thinkingTimer = null; }
             dequeue(activeChatId);
         })();
@@ -839,7 +923,7 @@ async function main() {
 
     console.log('[✓] Telegram polling started');
     if (ADMIN_CHAT_ID) {
-        tgSend(ADMIN_CHAT_ID, `✅ Bot started\n🤖 ${session.modelLabel}\n⚙️ ${session.modeLabel}\nAgentic: ${session.agenticEnabled}\nYOLO: ${session.yoloMode ? 'ON' : 'OFF'}`).catch(() => { });
+        tgSend(ADMIN_CHAT_ID, `✅ Gagaclaw v${LOCAL_VERSION} started\n🤖 ${session.modelLabel}\n⚙️ ${session.modeLabel}\nAgentic: ${session.agenticEnabled}\nYOLO: ${session.yoloMode ? 'ON' : 'OFF'}`).catch(() => { });
     }
 
     async function poll() {
@@ -873,7 +957,7 @@ async function main() {
                             await session.approvePermission(perm, allowed, {
                                 scope: 'PERMISSION_SCOPE_CONVERSATION',
                             });
-                        // ── Command buttons ──
+                            // ── Command buttons ──
                         } else if (data.startsWith('cmd_model_')) {
                             const key = data.slice(10);
                             if (session.setModel(key)) {
