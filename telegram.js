@@ -582,7 +582,7 @@ async function main() {
         processCronQueue();
     }
 
-    function processCronQueue() {
+    async function processCronQueue() {
         // Refill buffer from queue files
         if (_cronPending.length === 0) {
             _cronPending.push(...cron.consumeQueue('telegram'));
