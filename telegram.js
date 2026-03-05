@@ -82,7 +82,7 @@ function fixTgHtml(html) {
     while ((m = tagRe.exec(html)) !== null) {
         const isClose = m[1] === '/';
         const tag = m[2].toLowerCase();
-        if (!['b', 'strong', 'i', 'em', 'u', 'ins', 's', 'strike', 'del', 'code', 'pre', 'blockquote', 'tg-spoiler'].includes(tag)) continue;
+        if (!['b', 'strong', 'i', 'em', 'u', 'ins', 's', 'strike', 'del', 'code', 'pre', 'blockquote', 'tg-spoiler', 'a'].includes(tag)) continue;
         if (isClose) {
             // Find matching open tag
             const idx = tagStack.lastIndexOf(tag);
