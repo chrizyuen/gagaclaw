@@ -429,6 +429,13 @@ For ALL scenarios above:
 - Ensure /dev/shm is at least 2GB: mount -o remount,size=2G /dev/shm
 - The --no-sandbox flag is required when running as non-root or in Docker
 - Telegram and Cron scripts include "read" at the end so the terminal window stays open
+- [🐳 DOCKER] File ownership: The entire gagaclaw directory must be owned by the desktop user
+  who runs node/Antigravity, otherwise writing to cronjobs.json, queue/, etc. will fail with
+  EACCES permission denied. Run: chown -R <USER>:<USER> /path/to/gagaclaw
+- [🐳 DOCKER] Optional: Mount the host root filesystem for full access (HIGH RISK — the AI
+  can read/write any file on the host):
+    volumes:
+      - /:/host_root
 
 Step 8 — Verify:
 Do a final check:
@@ -440,6 +447,8 @@ Do a final check:
 - [🐧 LINUX] If Linux: verify targetExecutables is ["antigravity"] (not ["Antigravity.exe"])
 - [🐧 LINUX] Verify CDP is accessible: curl -s http://127.0.0.1:9229/json/version
 - [🐧 LINUX] Verify start.sh, start-telegram.sh, start-cron.sh exist and are executable
+- [🐳 DOCKER] Verify file ownership: ls -la gagaclaw.json cronjobs.json queue/ — all must be
+  writable by the user running node. If not, run: chown -R <USER>:<USER> /path/to/gagaclaw
 Report any issues found, or confirm everything is ready.
 
 Step 9 — Done:
@@ -901,6 +910,12 @@ start-cron.sh:
 - 確保 /dev/shm 至少 2GB：mount -o remount,size=2G /dev/shm
 - 以非 root 身分或在 Docker 中執行時，必須加上 --no-sandbox 參數
 - Telegram 和 Cron 腳本結尾有 "read"，讓終端視窗保持開啟
+- [🐳 DOCKER] 檔案所有權：整個 gagaclaw 目錄必須屬於執行 node/Antigravity 的桌面使用者，
+  否則寫入 cronjobs.json、queue/ 等檔案時會出現 EACCES 權限拒絕錯誤。
+  執行：chown -R <USER>:<USER> /path/to/gagaclaw
+- [🐳 DOCKER] 選用：掛載主機根目錄以獲得完整存取權限（高風險 — AI 可讀寫主機上的任何檔案）：
+    volumes:
+      - /:/host_root
 
 步驟 8 — 驗證：
 執行最終檢查：
@@ -912,6 +927,8 @@ start-cron.sh:
 - [🐧 LINUX] 如為 Linux：確認 targetExecutables 為 ["antigravity"]（非 ["Antigravity.exe"]）
 - [🐧 LINUX] 確認 CDP 可連線：curl -s http://127.0.0.1:9229/json/version
 - [🐧 LINUX] 確認 start.sh、start-telegram.sh、start-cron.sh 存在且為可執行
+- [🐳 DOCKER] 確認檔案所有權：ls -la gagaclaw.json cronjobs.json queue/ — 全部必須為執行
+  node 的使用者可寫入。若不是，執行：chown -R <USER>:<USER> /path/to/gagaclaw
 回報任何發現的問題，或確認一切就緒。
 
 步驟 9 — 完成：
