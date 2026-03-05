@@ -3,7 +3,7 @@
         "gagaclaw_recommend": {
             "command": "node",
             "args": [
-                "c:/py/anti/gagaclaw_recommend_mcp/index.js"
+                "gagaclaw_recommend_mcp/index.js"
             ]
         }
     }

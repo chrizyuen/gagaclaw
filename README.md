@@ -119,18 +119,14 @@ The included `gagaclaw_recommend_mcp` provides two tools:
 - **`groq_transcribe`** — Transcribe audio files to text using Groq Whisper API
 - **`telegram_send_file`** — Send files to Telegram admin chat (auto-converts `.md` to `.html`)
 
-To register it in Antigravity, add the following to your MCP settings:
+To register it in Antigravity:
 
-```json
-{
-  "mcpServers": {
-    "gagaclaw_recommend_mcp": {
-      "command": "node",
-      "args": ["/absolute/path/to/gagaclaw/gagaclaw_recommend_mcp/index.js"]
-    }
-  }
-}
-```
+1. Edit `mcp_config.json` in the project root — set the absolute path to `index.js`
+2. Copy it to Antigravity's config directory:
+   - **Windows:** `%USERPROFILE%\.gemini\antigravity\mcp_config.json`
+   - **Linux/macOS:** `~/.gemini/antigravity/mcp_config.json`
+
+The IDE only reads MCP config from `~/.gemini/antigravity/` — if you change `mcp_config.json` later, copy it again.
 
 ## Project Structure
 
@@ -317,18 +313,14 @@ cp cronjobs.example.json cronjobs.json
 - **`groq_transcribe`** — 使用 Groq Whisper API 將音訊檔轉為文字
 - **`telegram_send_file`** — 傳送檔案到 Telegram 管理員聊天室（自動將 `.md` 轉換為 `.html`）
 
-在 Antigravity 中註冊，將以下內容加入 MCP 設定：
+在 Antigravity 中註冊：
 
-```json
-{
-  "mcpServers": {
-    "gagaclaw_recommend_mcp": {
-      "command": "node",
-      "args": ["/你的絕對路徑/gagaclaw/gagaclaw_recommend_mcp/index.js"]
-    }
-  }
-}
-```
+1. 編輯專案根目錄的 `mcp_config.json` — 設定 `index.js` 的絕對路徑
+2. 複製到 Antigravity 的設定目錄：
+   - **Windows:** `%USERPROFILE%\.gemini\antigravity\mcp_config.json`
+   - **Linux/macOS:** `~/.gemini/antigravity/mcp_config.json`
+
+IDE 只會從 `~/.gemini/antigravity/` 讀取 MCP 設定 — 日後修改 `mcp_config.json` 後需重新複製。
 
 ## 專案結構
 

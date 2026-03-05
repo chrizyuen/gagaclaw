@@ -6,7 +6,7 @@ const path = require("path");
 const https = require("https");
 const FormData = require("form-data");
 
-const configPath = path.join(__dirname, "..", "..", "gagaclaw.json");
+const configPath = path.join(__dirname, "..", "gagaclaw.json");
 let config = {};
 try { config = JSON.parse(fs.readFileSync(configPath, "utf8")); } catch (err) { process.exit(1); }
 
